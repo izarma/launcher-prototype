@@ -2,7 +2,6 @@ use eframe::App;
 use poll_promise::Promise;
 use rfd::FileDialog;
 use serde_json::Value;
-mod version_control;
 
 fn main() -> eframe::Result {
     let native_options = eframe::NativeOptions {
