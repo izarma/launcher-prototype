@@ -1,7 +1,12 @@
 use eframe::App;
 use poll_promise::Promise;
+use reqwest::blocking::get;
 use rfd::FileDialog;
 use serde_json::Value;
+use std::fs::{self, File};
+use std::io::{self, Write};
+use std::path::Path;
+use zip::ZipArchive;
 
 fn main() -> eframe::Result {
     let native_options = eframe::NativeOptions {
@@ -47,19 +52,19 @@ impl Default for Launcher {
             current_version: "loading...".to_owned(),
             latest_version,
             release_notes,
-            path: "D:\\Games\\Launcher".to_owned(),
+            path: "E:\\Games\\Launcher".to_owned(),
             version_promise: Some(promise),
         }
     }
 }
-
+const URL : &str = "https://api.github.com/repos/makscee/arena-of-ideas/releases/latest";
 impl App for Launcher {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.label(format!("Current Version: {}", self.current_version));
             if self.current_version != self.latest_version {
                 if ui.add(egui::Button::new("Update/Download")).clicked() {
-                    download_update();
+                    download_update(self.path.clone());
                 }
             }
             ui.label(format!("Latest Version: {}", self.latest_version));
@@ -74,14 +79,12 @@ impl App for Launcher {
                     self.path = path.to_string_lossy().to_string();
                 }
             }
-            ui.label(format!("Release Notes: \n {}", self.release_notes));
+            ui.label(format!("Release Notes: \n {}", self.release_notes)); 
         });
     }
 }
 
 fn fetch_latest_version_info() -> (String, String) {
-    let url = "https://api.github.com/repos/makscee/arena-of-ideas/releases/latest";
-
     // Create a client with a custom user-agent header (required by GitHub API)
     let client = reqwest::blocking::Client::builder()
         .user_agent("ArenaOfIdeasLauncher")
@@ -89,7 +92,7 @@ fn fetch_latest_version_info() -> (String, String) {
         .expect("Failed to create HTTP client");
 
     // Send the GET request
-    match client.get(url).send() {
+    match client.get(URL).send() {
         Ok(response) => {
             // Check if we got a successful response
             if response.status().is_success() {
@@ -103,6 +106,11 @@ fn fetch_latest_version_info() -> (String, String) {
                             .unwrap_or_else(|| "Error: Missing version".to_string());
 
                         let notes = json["body"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "No release notes available".to_string());
+
+                        let donwload_url = json["assets/url"]
                             .as_str()
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| "No release notes available".to_string());
@@ -128,6 +136,44 @@ fn fetch_latest_version_info() -> (String, String) {
     }
 }
 
-fn download_update() {
+fn download_update(path: String) {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("ArenaOfIdeasLauncher")
+        .build()
+        .expect("Failed to create HTTP client");
+    let url = "https://github.com/makscee/arena-of-ideas/releases/download/v1.8.2/arena-of-ideas-windows-v1.8.2.zip";
+    let response = client.get(url).send().unwrap().bytes().unwrap();
+    let file_path = Path::new(&path).join("arena-of-ideas.zip");
+    let mut file = File::create(&file_path).unwrap();
+    file.write_all(&response).unwrap();
+    println!("File saved to {}", path);
+    let extract_to = Path::new(&path).join("arena-of-ideas");
+    unzip_file(&file_path, &extract_to);
+}
 
+fn unzip_file(file_path: &Path, extract_to: &Path) {
+    let zipfile = std::fs::File::open(file_path).unwrap();
+    let mut archive = zip::ZipArchive::new(zipfile).unwrap();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).unwrap();
+        let outpath = Path::new(extract_to).join(file.mangled_name());
+
+        if file.name().ends_with('/') {
+            // Create directory
+            fs::create_dir_all(&outpath).unwrap();
+        } else {
+            // Create parent directories
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(p).unwrap();
+                }
+            }
+
+            // Write file
+            let mut outfile = File::create(&outpath).unwrap();
+            io::copy(&mut file, &mut outfile).unwrap();
+        }
+    }
+    fs::remove_file(file_path).unwrap();
+    println!("Installed Successfully");
 }
